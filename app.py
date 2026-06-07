@@ -1,5 +1,4 @@
 import streamlit as st
-import tensorflow as tf
 import numpy as np
 from PIL import Image
 import os
@@ -15,10 +14,16 @@ st.set_page_config(
 )
 
 # ==========================================
-# LOAD MODEL
+# LOAD MODEL (AMAN)
 # ==========================================
 
-model = tf.keras.models.load_model("coral_model.keras")
+model = None
+
+try:
+    import tensorflow as tf
+    model = tf.keras.models.load_model("coral_model.keras")
+except Exception:
+    model = None
 
 # ==========================================
 # PREPROCESSING
@@ -103,10 +108,7 @@ if uploaded_file is not None:
 
     st.success("✔ Berkas citra berhasil dimuat")
 
-    if st.button(
-        "Jalankan Klasifikasi Citra",
-        type="primary"
-    ):
+    if st.button("Jalankan Klasifikasi Citra", type="primary"):
 
         st.markdown("---")
         st.markdown("### 📊 Hasil Analisis")
@@ -114,7 +116,7 @@ if uploaded_file is not None:
         if model is None:
 
             st.error(
-                "File coral_model.keras atau coral_model.h5 tidak ditemukan."
+                "Model belum tersedia / TensorFlow belum aktif di server Streamlit."
             )
 
         else:
@@ -123,48 +125,33 @@ if uploaded_file is not None:
 
                 img_tensor = preprocess_image(image)
 
-                prediction = model.predict(
-                    img_tensor,
-                    verbose=0
-                )
+                prediction = model.predict(img_tensor, verbose=0)
 
                 raw_score = float(prediction[0][0])
 
-                st.info(
-                    f"Raw Score Model : {raw_score:.4f}"
-                )
+                st.info(f"Raw Score Model : {raw_score:.4f}")
 
                 if raw_score > 0.5:
 
                     hasil = "Healthy Coral (Sehat)"
                     confidence = raw_score * 100
 
-                    st.success(
-                        f"### KONDISI AMAN: {hasil}"
-                    )
+                    st.success(f"### KONDISI AMAN: {hasil}")
 
                 else:
 
                     hasil = "Bleached Coral (Memutih/Sakit)"
                     confidence = (1 - raw_score) * 100
 
-                    st.error(
-                        f"### KONDISI KRITIS: {hasil}"
-                    )
+                    st.error(f"### KONDISI KRITIS: {hasil}")
 
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    st.metric(
-                        "Status Klasifikasi",
-                        "Selesai ✔"
-                    )
+                    st.metric("Status Klasifikasi", "Selesai ✔")
 
                 with col2:
-                    st.metric(
-                        "Confidence Score",
-                        f"{confidence:.2f}%"
-                    )
+                    st.metric("Confidence Score", f"{confidence:.2f}%")
 
 # ==========================================
 # FOOTER
