@@ -1,8 +1,9 @@
 import streamlit as st
-import tensorflow as tf
 import numpy as np
 from PIL import Image
 import os
+# Mengganti TensorFlow raksasa dengan runtime TFLite yang super ringan
+import tflite_runtime.interpreter as tflite
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN
@@ -14,21 +15,25 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. LOAD MODEL (ANTI-CRASH SERVER RAM)
+# 2. LOAD MODEL TFLITE (ANTI-CRASH SERVER RAM)
 # ==========================================
 # Menggunakan decorator cache agar model hanya dimuat 1 kali ke RAM server Hugging Face
 @st.cache_resource
 def load_my_model():
-    model_name = "coral_model.keras"
+    # Menunjuk langsung ke nama file model TFLite hasil download kamu dari Colab
+    model_name = "model_coral_efficientnet.tflite"
     if os.path.exists(model_name):
         try:
-            return tf.keras.models.load_model(model_name)
+            # Memuat model menggunakan TFLite Interpreter
+            interpreter = tflite.Interpreter(model_path=model_name)
+            interpreter.allocate_tensors()
+            return interpreter
         except Exception as e:
-            st.error(f"Eror saat membaca berkas model: {e}")
+            st.error(f"Eror saat membaca berkas model TFLite: {e}")
             return None
     return None
 
-model = load_my_model()
+interpreter = load_my_model()
 
 # ==========================================
 # 3. PREPROCESSING GAMBAR
@@ -85,7 +90,7 @@ with tab2:
         uploaded_file = camera_input
 
 # ==========================================
-# 6. PROSES PREDIKSI REAL-TIME (AI ASLI)
+# 6. PROSES PREDIKSI REAL-TIME (AI ASLI TFLITE)
 # ==========================================
 if uploaded_file is not None:
     # Membuka berkas gambar yang dimasukkan pengguna
@@ -105,56 +110,67 @@ if uploaded_file is not None:
         st.markdown("---")
         st.markdown("### 📊 Hasil Analisis")
 
-        # Cek apakah file model .keras tadi berhasil dimuat atau tidak
-        if model is None:
-            st.error("⚠️ File 'coral_model.keras' tidak ditemukan atau gagal dimuat di server.")
+        # Cek apakah objek interpreter TFLite berhasil dimuat atau tidak
+        if interpreter is None:
+            st.error("⚠️ File 'model_coral_efficientnet.tflite' tidak ditemukan atau gagal dimuat di server.")
         else:
             with st.spinner("Menganalisis gambar dengan AI..."):
-                # 1. Jalankan fungsi pra-pemrosesan citra
-                img_tensor = preprocess_image(image)
+                try:
+                    # 1. Jalankan fungsi pra-pemrosesan citra
+                    img_tensor = preprocess_image(image)
 
-                # 2. Prediksi menggunakan model CNN kelompok kamu
-                prediction = model.predict(img_tensor, verbose=0)
-                raw_score = float(prediction[0][0])
+                    # Get input & output details untuk TFLite
+                    input_details = interpreter.get_input_details()
+                    output_details = interpreter.get_output_details()
 
-                # Log Nilai Mentah untuk Keperluan Evaluasi Akurasi
-                st.info(f"Raw Score Model : {raw_score:.4f}")
+                    # 2. Prediksi menggunakan model CNN versi TFLite
+                    interpreter.set_tensor(input_details[0]['index'], img_tensor)
+                    interpreter.invoke()
+                    prediction = interpreter.get_tensor(output_details[0]['index'])
+                    
+                    raw_score = float(prediction[0][0])
 
-                # 3. Logika Penentuan Batas Klasifikasi (Threshold)
-                # > 0.5 = Sehat, <= 0.5 = Sakit/Memutih
-                if raw_score > 0.5:
-                    hasil = "Healthy Coral (Sehat)"
-                    confidence = raw_score * 100
+                    # Log Nilai Mentah untuk Keperluan Evaluasi Akurasi
+                    st.info(f"Raw Score Model : {raw_score:.4f}")
 
-                    st.success(f"### KONDISI AMAN: {hasil}")
-                    st.markdown(
-                        """
-                        <div style="background-color:#e6f4ea; padding:15px; border-radius:10px; border-left:5px solid #137333; color:#1e1e1e;">
-                            <strong>Hasil Analisis:</strong> Terumbu karang dinilai dalam kondisi sehat dan memiliki pigmen warna normal.
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                else:
-                    hasil = "Bleached Coral (Memutih/Sakit)"
-                    confidence = (1 - raw_score) * 100
+                    # 3. Logika Penentuan Batas Klasifikasi (Threshold)
+                    # > 0.5 = Sehat, <= 0.5 = Sakit/Memutih
+                    if raw_score > 0.5:
+                        hasil = "Healthy Coral (Sehat)"
+                        confidence = raw_score * 100
 
-                    st.error(f"### KONDISI KRITIS: {hasil}")
-                    st.markdown(
-                        """
-                        <div style="background-color:#ffe6e6; padding:15px; border-radius:10px; border-left:5px solid #ff4b4b; color:#1e1e1e;">
-                            <strong>Hasil Analisis:</strong> Terumbu karang terdeteksi mengalami bleaching (pemutihan massal). Perlu perhatian khusus.
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                        st.success(f"### KONDISI AMAN: {hasil}")
+                        st.markdown(
+                            """
+                            <div style="background-color:#e6f4ea; padding:15px; border-radius:10px; border-left:5px solid #137333; color:#1e1e1e;">
+                                <strong>Hasil Analisis:</strong> Terumbu karang dinilai dalam kondisi sehat dan memiliki pigmen warna normal.
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        hasil = "Bleached Coral (Memutih/Sakit)"
+                        confidence = (1 - raw_score) * 100
 
-                # 4. Tampilan Metrik Output Akhir
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Status Klasifikasi", "Selesai ✔")
-                with col2:
-                    st.metric("Confidence Score", f"{confidence:.2f}%")
+                        st.error(f"### KONDISI KRITIS: {hasil}")
+                        st.markdown(
+                            """
+                            <div style="background-color:#ffe6e6; padding:15px; border-radius:10px; border-left:5px solid #ff4b4b; color:#1e1e1e;">
+                                <strong>Hasil Analisis:</strong> Terumbu karang terdeteksi mengalami bleaching (pemutihan massal). Perlu perhatian khusus.
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                    # 4. Tampilan Metrik Output Akhir
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Status Klasifikasi", "Selesai ✔")
+                    with col2:
+                        st.metric("Confidence Score", f"{confidence:.2f}%")
+                        
+                except Exception as e:
+                    st.error(f"Terjadi kesalahan saat memproses gambar dengan TFLite: {e}")
 
 # ==========================================
 # 7. FOOTER IDENTITAS KELOMPOK
